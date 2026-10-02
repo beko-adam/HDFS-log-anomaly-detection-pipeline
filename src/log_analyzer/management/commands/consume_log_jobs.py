@@ -148,12 +148,18 @@ class Command(BaseCommand):
 
                         resources_prediction = load_prediction_resources()
                         predict_saved_blocks(
-                            str(job.pk),
-                            resources=resources_prediction,
-                            batch_size=(
-                                settings.LOG_PREDICTION_BATCH_SIZE
-                            ),
+                            job_id,
+                            batch_size=10_000,
+                            workers=2,
                         )
+                        
+                        # predict_saved_blocks(
+                        #     str(job.pk),
+                        #     resources=resources_prediction,
+                        #     batch_size=(
+                        #         settings.LOG_PREDICTION_BATCH_SIZE
+                        #     ),
+                        # )
 
 
                     """#######################################################"""
@@ -224,10 +230,23 @@ class Command(BaseCommand):
                             f"Prediction queued: {job.pk}"
                         )
 
-                consumer.commit(
-                    message=message,
-                    asynchronous=False,
-                )
+                # consumer.commit(
+                #     message=message,
+                #     asynchronous=False,
+                # )
+
+
+                consumer = Consumer({
+                    "bootstrap.servers": settings.KAFKA_BOOTSTRAP_SERVERS,
+                    "broker.address.family": "v4",
+                    "group.id": group,
+                    "enable.auto.commit": False,
+                    "enable.auto.offset.store": False,
+
+                    # Allow up to 30 minutes between poll calls.
+                    "max.poll.interval.ms": 1_800_000,
+                })
+
 
                 close_old_connections()
 

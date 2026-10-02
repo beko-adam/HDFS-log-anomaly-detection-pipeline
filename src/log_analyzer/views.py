@@ -29,7 +29,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .kafka_queue import publish_log_job
-from .models import LogJob
+from .models import LogJob, BlockPrediction, BlockFeature
 from .serializers import CreateJobSerializer, JobSerializer
 from django.http import JsonResponse
 
@@ -39,7 +39,10 @@ logger = logging.getLogger(__name__)
 
 
 def index(request):
-    
+
+
+    BlockFeature.objects.all().delete()
+    BlockPrediction.objects.all().delete()
     LogJob.objects.all().delete()
     return JsonResponse({"status": "ok", "service": "hdfs-anomaly"})
 
@@ -95,6 +98,45 @@ class PredictionPagination(PageNumberPagination):
     page_size = 100
 
 
+# class PredictionListView(generics.ListAPIView):
+#     serializer_class = PredictionSerializer
+#     pagination_class = PredictionPagination
+
+#     def get_queryset(self):
+#         job = get_object_or_404(
+#             LogJob,
+#             pk=self.kwargs["job_id"],
+#         )
+
+#         if job.status != LogJob.Status.COMPLETED:
+#             return BlockPrediction.objects.none()
+
+#         queryset = (
+#             BlockPrediction.objects
+#             .filter(feature__job=job)
+#             .select_related("feature")
+#             .order_by("pk")
+#         )
+
+#         label = self.request.query_params.get("label")
+
+#         if label:
+#             queryset = queryset.filter(label=label)
+
+#         return queryset
+
+
+import csv
+
+from django.http import StreamingHttpResponse
+from django.shortcuts import get_object_or_404
+from rest_framework import generics
+
+class Echo:
+    def write(self, value):
+        return value
+
+
 class PredictionListView(generics.ListAPIView):
     serializer_class = PredictionSerializer
     pagination_class = PredictionPagination
@@ -121,4 +163,33 @@ class PredictionListView(generics.ListAPIView):
             queryset = queryset.filter(label=label)
 
         return queryset
+
+    def list(self, request, *args, **kwargs):
+        if request.query_params.get("export") != "csv":
+            return super().list(request, *args, **kwargs)
+
+        queryset = self.filter_queryset(self.get_queryset())
+
+        writer = csv.writer(Echo())
+
+        def rows():
+            yield writer.writerow(["BlockId", "Prediction"])
+
+            # Adjust feature__block_id to your actual model field.
+            records = queryset.values_list(
+                "feature__block_id",
+                "label",
+            ).iterator(chunk_size=2000)
+
+            for block_id, label in records:
+                yield writer.writerow([block_id, label])
+
+        response = StreamingHttpResponse(
+            rows(),
+            content_type="text/csv",
+        )
+        response["Content-Disposition"] = (
+            'attachment; filename="predictions.csv"'
+        )
+        return response
 

@@ -77,7 +77,7 @@ def load_conversion_resources():
     }
 
 
-def convert_logs(source_url, resources, workers=10, chunk_size=200_000):
+def convert_logs(source_url, resources, workers=5, chunk_size=200_000):
     """Read and group logs. Does not write to the database."""
     if min(workers, chunk_size) <= 0:
         raise ValueError("workers and chunk_size must be positive.")
@@ -130,6 +130,12 @@ def convert_logs(source_url, resources, workers=10, chunk_size=200_000):
                 f"Blocks: {len(block_counts):,}",
                 flush=True,
             )
+
+
+
+
+
+
 
     lines = collect_data(source_url)
     pending = set()

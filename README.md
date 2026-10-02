@@ -137,6 +137,9 @@ docker compose --env-file docker.env stop
 docker compose --env-file docker.env up --build -d
 ```
 
+python3 -m http.server 9005 --bind 0.0.0.0
+
+
 Database and Kafka data persist in named volumes. Do not use down -v unless you intentionally want to erase both data stores.
 
 ## Changes from the upload

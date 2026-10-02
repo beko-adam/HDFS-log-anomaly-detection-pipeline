@@ -1,0 +1,197 @@
+x-app: &app
+  build: .
+  environment:
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    KAFKA_JOB_TOPIC: log-jobs
+    KAFKA_CONSUMER_GROUP: hdfs-job-processors
+    KAFKA_PREDICTION_TOPIC: prediction-jobs
+    KAFKA_PREDICTION_GROUP: hdfs-prediction-processors
+    DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-only-change-me}
+    TEMPLATE_WILDCARD: "${TEMPLATE_WILDCARD:-[*]}"
+    LOG_MATCH_MODE: ${LOG_MATCH_MODE:-full}
+    HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
+    HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
+    LOG_ALLOWED_ORIGINS: http://host.docker.internal:9005
+
+  volumes:
+    - ./outputs:/outputs:ro
+    - ./models:/app/models:ro
+    - ./data:/app/data
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    kafka:
+      condition: service_healthy
+
+services:
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /tmp/kraft-combined-logs
+    volumes:
+      - kafka_data:/tmp/kraft-combined-logs
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  web:
+    <<: *app
+    command: sh -c 'python manage.py migrate && python manage.py runserver 0.0.0.0:8000'
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    env_file:
+      - ./docker.env
+
+  worker:
+    <<: *app
+    command: python manage.py consume_log_jobs --stage conversion
+    restart: on-failure
+      
+    env_file:
+      - ./docker.env
+
+  prediction:
+    <<: *app
+    command: python manage.py consume_log_jobs --stage prediction
+    restart: on-failure
+      
+    env_file:
+      - ./docker.env
+
+volumes:
+  kafka_data:
+
+
+
+
+# services:
+#   redis:
+#     image: redis:7
+
+#   web:
+#     build: .
+#     command: sh -c 'python manage.py migrate && python manage.py runserver 0.0.0.0:8000'
+#     environment:
+#       CELERY_BROKER_URL: redis://redis:6379/0
+#       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-only-change-me}
+#       LOG_ALLOWED_ORIGINS: ${LOG_ALLOWED_ORIGINS:-http://host.docker.internal:9000}
+#       TEMPLATE_WILDCARD: "${TEMPLATE_WILDCARD:-[*]}"
+#       LOG_MATCH_MODE: ${LOG_MATCH_MODE:-full}
+#       HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
+#       HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
+#     volumes:
+#       - ./outputs:/outputs:ro
+#       - ./models:/app/models:ro
+#       - ./data:/app/data
+#     extra_hosts:
+#       - "host.docker.internal:host-gateway"
+#     depends_on:
+#       - redis
+#     ports:
+#       - "127.0.0.1:8000:8000"
+
+#   worker:
+#     build: .
+#     command: celery -A config worker -l INFO --concurrency=1
+#     environment:
+#       CELERY_BROKER_URL: redis://redis:6379/0
+#       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-only-change-me}
+#       LOG_ALLOWED_ORIGINS: ${LOG_ALLOWED_ORIGINS:-http://host.docker.internal:9000}
+#       TEMPLATE_WILDCARD: "${TEMPLATE_WILDCARD:-[*]}"
+#       LOG_MATCH_MODE: ${LOG_MATCH_MODE:-full}
+#       HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
+#       HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
+#     volumes:
+#       - ./outputs:/outputs:ro
+#       - ./models:/app/models:ro
+#       - ./data:/app/data
+#     extra_hosts:
+#       - "host.docker.internal:host-gateway"
+#     depends_on:
+#       - redis
+
+
+
+# # x-app: &app
+# #   build: .
+# #   volumes:
+# #     - ./models:/app/models:ro
+# #     - ./data:/app/data:ro
+# #   environment: &env
+# #     POSTGRES_HOST: postgres
+# #     POSTGRES_DB: hdfs
+# #     POSTGRES_USER: hdfs
+# #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-hdfs-password}
+# #     CELERY_BROKER_URL: redis://redis:6379/0
+# #     DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-only-change-me}
+# #     LOG_ALLOWED_ORIGINS: ${LOG_ALLOWED_ORIGINS:-http://host.docker.internal:9000}
+# #     TEMPLATE_WILDCARD: ${TEMPLATE_WILDCARD:-[*]}
+# #     LOG_MATCH_MODE: ${LOG_MATCH_MODE:-full}
+# #     POSTGRES_PORT: "5432"
+# #     HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
+# #     HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
+
+
+# #   extra_hosts:
+# #     - host.docker.internal:host-gateway
+# #   depends_on:
+# #     postgres:
+# #       condition: service_healthy
+# #     redis:
+# #       condition: service_started
+# # services:
+# #   postgres:
+# #     image: postgres:16
+# #     environment:
+# #       POSTGRES_DB: hdfs
+# #       POSTGRES_USER: hdfs
+# #       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-hdfs-password}
+# #     volumes:
+# #       - pgdata:/var/lib/postgresql/data
+# #     healthcheck:
+# #       test: [CMD-SHELL, 'pg_isready -U hdfs -d hdfs']
+# #       interval: 5s
+# #       retries: 10
+# #   redis:
+# #     image: redis:7
+# #   web:
+# #     <<: *app
+# #     command: sh -c 'python manage.py migrate && python manage.py runserver 0.0.0.0:8000'
+# #     environment:
+# #       HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
+# #       HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
+# #     volumes:
+# #       - ./outputs:/outputs:ro
+     
+# #     ports:
+# #       - '127.0.0.1:8000:8000'
+# #   worker:
+# #     <<: *app
+# #     command: celery -A config worker -l INFO --concurrency=1
+# #     environment:
+# #       HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
+# #       HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
+# #     volumes:
+# #       - ./outputs:/outputs:ro
+     
+
+# # volumes:
+# #   pgdata:

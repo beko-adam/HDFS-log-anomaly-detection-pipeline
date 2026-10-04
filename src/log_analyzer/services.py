@@ -17,10 +17,67 @@ from django.utils import timezone
 
 from .models import BlockFeature, LogJob
 from .parser_workers import initialize_parser, parse_chunk
+import threading
+import psutil
 
 
 BLOCK_PATTERN = re.compile(r"blk_-?\d+")
 WILDCARD_PATTERN = re.compile(r"<\*>|\[\*\]")
+
+
+
+import threading
+import psutil
+
+
+class MemoryMonitor:
+    def __init__(self, interval=0.5):
+        self.interval = interval
+        self.process = psutil.Process()
+        self.stop_event = threading.Event()
+        self.thread = None
+        self.baseline_mb = 0.0
+        self.main_peak_mb = 0.0
+        self.children_peak_mb = 0.0
+        self.total_peak_mb = 0.0
+
+    def sample(self):
+        try:
+            main_mb = self.process.memory_info().rss / (1024 ** 2)
+            children = self.process.children(recursive=True)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return
+
+        children_mb = 0.0
+
+        for child in children:
+            try:
+                children_mb += child.memory_info().rss / (1024 ** 2)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        self.main_peak_mb = max(self.main_peak_mb, main_mb)
+        self.children_peak_mb = max(self.children_peak_mb, children_mb)
+        self.total_peak_mb = max(self.total_peak_mb, main_mb + children_mb)
+
+    def run(self):
+        while not self.stop_event.wait(self.interval):
+            self.sample()
+
+    def __enter__(self):
+        self.baseline_mb = self.process.memory_info().rss / (1024 ** 2)
+        self.sample()
+        self.thread = threading.Thread(target=self.run, daemon=True)
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.stop_event.set()
+        self.thread.join()
+        self.sample()
+        print(f"Memory | main baseline={self.baseline_mb:,.1f} MB | main sampled peak={self.main_peak_mb:,.1f} MB | workers sampled peak={self.children_peak_mb:,.1f} MB | combined sampled peak={self.total_peak_mb:,.1f} MB", flush=True)
+
+
 
 
 def collect_data(source_url):
@@ -307,8 +364,52 @@ def save_features(job, block_counts, batch_size=100_000, workers=2, insert_batch
 
     return job
 
-
 def convert_and_save_logs(source_url, batch_size=100_000, job_id=None, resources=None, workers=10, chunk_size=200_000):
+    """Claim, convert and save a job while measuring process memory."""
+    if min(batch_size, workers, chunk_size) <= 0:
+        raise ValueError("batch_size, workers and chunk_size must be positive.")
+
+    start = time.perf_counter()
+    statistics = {}
+
+    if job_id is None:
+        job = LogJob.objects.create(source_url=source_url, status=LogJob.Status.CONVERTING)
+    else:
+        claimed = LogJob.objects.filter(pk=job_id, source_url=source_url, status=LogJob.Status.PENDING).update(status=LogJob.Status.CONVERTING)
+
+        if not claimed:
+            raise ValueError("Job is missing or already started.")
+
+        job = LogJob.objects.get(pk=job_id)
+
+    with MemoryMonitor(interval=0.5) as memory:
+        try:
+            if resources is None:
+                resources = load_conversion_resources()
+
+            job.event_ids = resources["event_ids"]
+            job.threshold = resources["threshold"]
+            job.save(update_fields=["event_ids", "threshold"])
+            print(f"Conversion job: {job.pk}", flush=True)
+
+            block_counts, statistics = convert_logs(source_url, resources, workers=workers, chunk_size=chunk_size)
+            memory.sample()
+            print(f"Memory after conversion | main RSS={memory.process.memory_info().rss / (1024 ** 2):,.1f} MB | blocks={len(block_counts):,}", flush=True)
+
+            job.statistics = statistics
+            job.save(update_fields=["statistics"])
+
+            save_features(job, block_counts, batch_size=batch_size)
+            memory.sample()
+            print(f"Memory after saving | main RSS={memory.process.memory_info().rss / (1024 ** 2):,.1f} MB", flush=True)
+
+            del block_counts
+            print(f"Convert and save total: {time.perf_counter() - start:.3f}s", flush=True)
+            return job
+
+        except Exception as exc:
+            LogJob.objects.filter(pk=job.pk).update(status=LogJob.Status.FAILED, error=str(exc), statistics=statistics, finished_at=timezone.now())
+            raise
     """Existing Kafka entry point: claim, convert, save."""
     if min(batch_size, workers, chunk_size) <= 0:
         raise ValueError("batch_size, workers and chunk_size must be positive.")

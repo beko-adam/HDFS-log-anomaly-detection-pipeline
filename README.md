@@ -2,6 +2,10 @@
 
 This packages the uploaded, working whole-job pipeline: one conversion consumer with local multiprocessing, followed by one prediction consumer. It does not enable distributed chunk parsing or run Celery/Redis.
 
+
+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
+
+
 ## Included services
 
 | Service | Purpose |
@@ -135,9 +139,11 @@ Allow current jobs to complete before stopping, because in-memory aggregation is
 ```bash
 docker compose --env-file docker.env stop
 docker compose --env-file docker.env up --build -d
+python3 -m http.server 9005 --bind 0.0.0.0
+docker compose --env-file docker.env exec web python manage.py index_predictions
 ```
 
-python3 -m http.server 9005 --bind 0.0.0.0
+
 
 
 Database and Kafka data persist in named volumes. Do not use down -v unless you intentionally want to erase both data stores.

@@ -6,6 +6,7 @@ from .views import (
     JobDetailView,
     PredictionListView,
     index,
+    search_predictions,
 )
 
 
@@ -17,4 +18,10 @@ urlpatterns = [
         "jobs/<uuid:job_id>/predictions/",
         PredictionListView.as_view(),
     ),
+        path(
+        "predictions/search/",
+        search_predictions,
+        name="search-predictions",
+    ),
+    path("jobs/<uuid:job_id>/", JobDetailView.as_view(), name="job-detail"),
 ]

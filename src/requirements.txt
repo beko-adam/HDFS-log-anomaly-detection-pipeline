@@ -38,3 +38,6 @@ wcwidth==0.9.1
 
 psycopg[binary]>=3.2,<4
 gunicorn>=26.2,<27
+
+elasticsearch>=8,<9
+

@@ -32,6 +32,10 @@ from .kafka_queue import publish_log_job
 from .models import LogJob, BlockPrediction, BlockFeature
 from .serializers import CreateJobSerializer, JobSerializer
 from django.http import JsonResponse
+from django.conf import settings
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
 
 logger = logging.getLogger(__name__)
 
@@ -41,15 +45,27 @@ logger = logging.getLogger(__name__)
 def index(request):
 
 
-    BlockFeature.objects.all().delete()
-    BlockPrediction.objects.all().delete()
-    LogJob.objects.all().delete()
+   
+    LogJob.objects.all().first().delete()
     return JsonResponse({"status": "ok", "service": "hdfs-anomaly"})
 
 
 
 
+def delete(self, request, job_id):
+    job = get_object_or_404(LogJob, pk=job_id)
+    if job.status not in [LogJob.Status.COMPLETED, LogJob.Status.FAILED]:
+        return Response({"detail": "Only completed or failed jobs can be deleted."}, status=status.HTTP_409_CONFLICT)
+    job.delete()
+    return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+
 class CreateJobView(APIView):
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = CreateJobSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -89,14 +105,28 @@ class CreateJobView(APIView):
         )
     
 
-class JobDetailView(generics.RetrieveAPIView):
-    queryset = LogJob.objects.all()
-    serializer_class = JobSerializer
 
 
 class PredictionPagination(PageNumberPagination):
     page_size = 100
 
+
+
+class JobDetailView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request, job_id):
+        job = get_object_or_404(LogJob, pk=job_id)
+        return Response(JobSerializer(job).data)
+
+    def delete(self, request, job_id):
+        job = get_object_or_404(LogJob, pk=job_id)
+        if job.status not in [LogJob.Status.COMPLETED, LogJob.Status.FAILED]:
+            return Response({"detail": "Only completed or failed jobs can be deleted."}, status=status.HTTP_409_CONFLICT)
+        job.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    
 
 # class PredictionListView(generics.ListAPIView):
 #     serializer_class = PredictionSerializer
@@ -193,3 +223,40 @@ class PredictionListView(generics.ListAPIView):
         )
         return response
 
+
+
+
+
+from .search import get_client
+
+
+@api_view(["GET"])
+def search_predictions(request):
+    filters = []
+
+    for field in ("job_id", "block_id", "label"):
+        value = request.query_params.get(field)
+
+        if value:
+            filters.append({"term": {field: value}})
+
+    query = (
+        {"bool": {"filter": filters}}
+        if filters
+        else {"match_all": {}}
+    )
+
+    with get_client() as client:
+        result = client.search(
+            index=settings.ELASTICSEARCH_PREDICTION_INDEX,
+            query=query,
+            size=50,
+            sort=[{"created_at": "desc"}],
+        )
+
+    return Response({
+        "results": [
+            hit["_source"]
+            for hit in result["hits"]["hits"]
+        ]
+    })

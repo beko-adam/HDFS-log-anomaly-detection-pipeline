@@ -76,28 +76,31 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.db.backends.sqlite3",
-#         "NAME": BASE_DIR / "data" / "db.sqlite3",
-#     }
-# }
 
 
-DATABASES = {
+if os.environ.get("DJANGO_ENV") == "production":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ["POSTGRES_DB"],
+            "USER": os.environ["POSTGRES_USER"],
+            "PASSWORD": os.environ["POSTGRES_PASSWORD"],
+            "HOST": os.environ["POSTGRES_HOST"],
+            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+            "CONN_MAX_AGE": 60,
+            "CONN_HEALTH_CHECKS": True,
+            "OPTIONS": {
+                "sslmode": "require",
+                "connect_timeout": 10,
+            },
+        }
+    }
+else:
+
+    DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ["POSTGRES_DB"],
-        "USER": os.environ["POSTGRES_USER"],
-        "PASSWORD": os.environ["POSTGRES_PASSWORD"],
-        "HOST": os.environ["POSTGRES_HOST"],
-        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-        "CONN_MAX_AGE": 60,
-        "CONN_HEALTH_CHECKS": True,
-        "OPTIONS": {
-            "sslmode": "require",
-            "connect_timeout": 10,
-        },
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "data" / "db.sqlite3",
     }
 }
 
@@ -159,19 +162,29 @@ HDFS_ALLOWED_LOG_URLS = os.environ.get(
     "http://127.0.0.1:9000/sample_hdfs.log,http://127.0.0.1:9000/HDFS.log",
 ).split(",")
 
+
+
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
-    ],
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
 }
 
-
 HDFS_ALLOWED_LOG_URLS = [
     "http://host.docker.internal:9005/HDFS.log",
 ]
+
+
+
+import os
+
+ELASTICSEARCH_URL = os.getenv(
+    "ELASTICSEARCH_URL",
+    "http://localhost:9200",
+)
+ELASTICSEARCH_API_KEY = os.getenv("ELASTICSEARCH_API_KEY")
+ELASTICSEARCH_PREDICTION_INDEX = "block-predictions"
 
 
 

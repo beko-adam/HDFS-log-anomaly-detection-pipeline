@@ -1,5 +1,8 @@
 x-app: &app
   build: .
+  env_file:
+    - ./docker.env
+
   environment:
     KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     KAFKA_JOB_TOPIC: log-jobs
@@ -12,13 +15,17 @@ x-app: &app
     HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
     HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
     LOG_ALLOWED_ORIGINS: http://host.docker.internal:9005
+    ELASTICSEARCH_URL: http://elasticsearch:9200
+    DJANGO_ENV: development
 
   volumes:
     - ./outputs:/outputs:ro
     - ./models:/app/models:ro
     - ./data:/app/data
+
   extra_hosts:
     - "host.docker.internal:host-gateway"
+
   depends_on:
     kafka:
       condition: service_healthy
@@ -45,153 +52,53 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1
+        - "/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1"
       interval: 10s
       timeout: 10s
       retries: 12
       start_period: 30s
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.22
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1"
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
 
   web:
     <<: *app
     command: sh -c 'python manage.py migrate && python manage.py runserver 0.0.0.0:8000'
     ports:
       - "127.0.0.1:8000:8000"
-
-    env_file:
-      - ./docker.env
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
 
   worker:
     <<: *app
     command: python manage.py consume_log_jobs --stage conversion
     restart: on-failure
-      
-    env_file:
-      - ./docker.env
 
   prediction:
     <<: *app
     command: python manage.py consume_log_jobs --stage prediction
     restart: on-failure
-      
-    env_file:
-      - ./docker.env
 
 volumes:
   kafka_data:
-
-
-
-
-# services:
-#   redis:
-#     image: redis:7
-
-#   web:
-#     build: .
-#     command: sh -c 'python manage.py migrate && python manage.py runserver 0.0.0.0:8000'
-#     environment:
-#       CELERY_BROKER_URL: redis://redis:6379/0
-#       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-only-change-me}
-#       LOG_ALLOWED_ORIGINS: ${LOG_ALLOWED_ORIGINS:-http://host.docker.internal:9000}
-#       TEMPLATE_WILDCARD: "${TEMPLATE_WILDCARD:-[*]}"
-#       LOG_MATCH_MODE: ${LOG_MATCH_MODE:-full}
-#       HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
-#       HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
-#     volumes:
-#       - ./outputs:/outputs:ro
-#       - ./models:/app/models:ro
-#       - ./data:/app/data
-#     extra_hosts:
-#       - "host.docker.internal:host-gateway"
-#     depends_on:
-#       - redis
-#     ports:
-#       - "127.0.0.1:8000:8000"
-
-#   worker:
-#     build: .
-#     command: celery -A config worker -l INFO --concurrency=1
-#     environment:
-#       CELERY_BROKER_URL: redis://redis:6379/0
-#       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-only-change-me}
-#       LOG_ALLOWED_ORIGINS: ${LOG_ALLOWED_ORIGINS:-http://host.docker.internal:9000}
-#       TEMPLATE_WILDCARD: "${TEMPLATE_WILDCARD:-[*]}"
-#       LOG_MATCH_MODE: ${LOG_MATCH_MODE:-full}
-#       HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
-#       HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
-#     volumes:
-#       - ./outputs:/outputs:ro
-#       - ./models:/app/models:ro
-#       - ./data:/app/data
-#     extra_hosts:
-#       - "host.docker.internal:host-gateway"
-#     depends_on:
-#       - redis
-
-
-
-# # x-app: &app
-# #   build: .
-# #   volumes:
-# #     - ./models:/app/models:ro
-# #     - ./data:/app/data:ro
-# #   environment: &env
-# #     POSTGRES_HOST: postgres
-# #     POSTGRES_DB: hdfs
-# #     POSTGRES_USER: hdfs
-# #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-hdfs-password}
-# #     CELERY_BROKER_URL: redis://redis:6379/0
-# #     DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-development-only-change-me}
-# #     LOG_ALLOWED_ORIGINS: ${LOG_ALLOWED_ORIGINS:-http://host.docker.internal:9000}
-# #     TEMPLATE_WILDCARD: ${TEMPLATE_WILDCARD:-[*]}
-# #     LOG_MATCH_MODE: ${LOG_MATCH_MODE:-full}
-# #     POSTGRES_PORT: "5432"
-# #     HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
-# #     HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
-
-
-# #   extra_hosts:
-# #     - host.docker.internal:host-gateway
-# #   depends_on:
-# #     postgres:
-# #       condition: service_healthy
-# #     redis:
-# #       condition: service_started
-# # services:
-# #   postgres:
-# #     image: postgres:16
-# #     environment:
-# #       POSTGRES_DB: hdfs
-# #       POSTGRES_USER: hdfs
-# #       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-hdfs-password}
-# #     volumes:
-# #       - pgdata:/var/lib/postgresql/data
-# #     healthcheck:
-# #       test: [CMD-SHELL, 'pg_isready -U hdfs -d hdfs']
-# #       interval: 5s
-# #       retries: 10
-# #   redis:
-# #     image: redis:7
-# #   web:
-# #     <<: *app
-# #     command: sh -c 'python manage.py migrate && python manage.py runserver 0.0.0.0:8000'
-# #     environment:
-# #       HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
-# #       HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
-# #     volumes:
-# #       - ./outputs:/outputs:ro
-     
-# #     ports:
-# #       - '127.0.0.1:8000:8000'
-# #   worker:
-# #     <<: *app
-# #     command: celery -A config worker -l INFO --concurrency=1
-# #     environment:
-# #       HDFS_MODEL_PATH: /outputs/anomaly_model.joblib
-# #       HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
-# #     volumes:
-# #       - ./outputs:/outputs:ro
-     
-
-# # volumes:
-# #   pgdata:
+  elasticsearch_data:

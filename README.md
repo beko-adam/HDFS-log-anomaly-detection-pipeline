@@ -1,49 +1,30 @@
-# HDFS anomaly app — Docker / Kafka
+# HDFS Log Anomaly Detection — Quick Start
 
-This packages the uploaded, working whole-job pipeline: one conversion consumer with local multiprocessing, followed by one prediction consumer. It does not enable distributed chunk parsing or run Celery/Redis.
+A Python pipeline that reads HDFS logs, groups events by block ID, and predicts whether each block is normal or anomalous.
 
+The application runs using Docker Compose with Django, conversion and prediction workers, Kafka, PostgreSQL, and an internal log-file server. Elasticsearch supports searching indexed predictions.
 
-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
+## 1. Configure
 
-
-## Included services
-
-| Service | Purpose |
-|---|---|
-| web | Django REST API via Gunicorn, localhost port 8000 |
-| conversion | Kafka conversion consumer; local parser subprocesses; in-memory block merging |
-| prediction | Kafka prediction consumer |
-| postgres | Shared PostgreSQL 16 database, persistent volume |
-| kafka | Local single-broker Kafka 4.0, persistent volume |
-| kafka-init | Creates log-jobs (4 partitions) and prediction-jobs (1 partition) |
-| migrate | Applies committed Django migrations before application startup |
-| logs | Serves existing host log files internally at http://logs:9000 |
-
-The app uses kafka:9092 and postgres:5432 inside Docker. Kafka/PostgreSQL/log-server ports are not published to the Mac. Existing host services on ports 9092 and 9000 can therefore coexist, although stop the old API if it occupies port 8000.
-
-## 1. Prepare configuration
-
-Extract this archive into a new folder and run all commands from the folder containing compose.yaml.
+Run all commands from the project folder containing `compose.yaml`. Make sure Docker is running and you have POSTGRES_DB 
 
 ```bash
 cp docker.env.example docker.env
 ```
 
-Edit docker.env. Set a random DJANGO_SECRET_KEY and POSTGRES_PASSWORD, and verify these absolute host directories:
+Edit `docker.env` and configure:
 
-- HDFS_MODEL_DIR: contains anomaly_model.joblib
-- HDFS_TEMPLATE_DIR: contains HDFS.log_templates.csv
-- HDFS_LOG_DIR: contains sample_hdfs.log and HDFS.log
+| Variable | Value |
+|---|---|
+| `DJANGO_SECRET_KEY` | A random secret |
+| `POSTGRES_PASSWORD` | Your database password |
+| `HDFS_MODEL_DIR` | Absolute directory containing `anomaly_model.joblib` |
+| `HDFS_TEMPLATE_DIR` | Absolute directory containing `HDFS.log_templates.csv` |
+| `HDFS_LOG_DIR` | Absolute directory containing `sample_hdfs.log` and `HDFS.log` |
 
-The supplied example uses your existing Mac paths. Directory values may contain spaces; they are parsed by Compose. Files are mounted read-only, not copied into the image. Existing directories must exist; Compose will fail instead of silently creating empty bind directories.
+The directories must exist. Files are mounted read-only. Do not commit `docker.env`.
 
-Use docker.env, not .env, because your Python virtual environment may already be named .env. Compose's --env-file flag loads path interpolation; env_file also passes app settings into containers. Do not commit docker.env.
-
-Parser defaults preserve the uploaded settings: 10 workers, 200,000-line chunks, 100,000-object database batches. Set LOG_CHUNK_SIZE=100000 if you want the earlier 112-chunk configuration. The conversion/prediction algorithms are unchanged.
-
-## 2. Build and start
-
-Docker Desktop must be running. Stop the old host Django API and any consumers you no longer want running. Let active jobs finish first.
+## 2. Build and Start
 
 ```bash
 docker compose --env-file docker.env config --quiet
@@ -51,116 +32,130 @@ docker compose --env-file docker.env up --build -d
 docker compose --env-file docker.env ps -a
 ```
 
-kafka-init and migrate should exit with code 0. They are one-time setup services, not crashed workers. The other services should run. Initial builds and Kafka startup may take several minutes.
+The `migrate` and `kafka-init` services should finish with exit code `0`. Application services should remain running.
+
+This guide assumes the API views allow access **without token authentication**.
+
+
+## 3 Serving the HDFS Log File
+
+Open a terminal in the folder containing `HDFS.log` and run:
 
 ```bash
-docker compose --env-file docker.env logs --tail=80 web conversion prediction
-```
-
-This starts a NEW PostgreSQL database. It does not import your SQLite jobs, users, or tokens. Your original SQLite file is not included or modified. The existing model and templates remain mounted from your Mac. Do not reuse a host-only log URL in container jobs.
-
-## 3. Create an admin and token
-
-```bash
-docker compose --env-file docker.env exec web python manage.py createsuperuser --username adam
-docker compose --env-file docker.env exec web python manage.py drf_create_token adam
-```
-
-Use the printed token from this new database. Your old token is unavailable unless its user/token records are explicitly migrated. Paste the new token when prompted:
-
-```bash
-read -r API_TOKEN
-export API_TOKEN
-```
-
-## 4. Verify resources and health
-
-```bash
-curl http://127.0.0.1:8000/api/
-docker compose --env-file docker.env exec web python manage.py check
-docker compose --env-file docker.env exec web python manage.py shell -c 'from log_analyzer.services import load_resources; r = load_resources(); print("Events:", len(r["event_ids"]), "Templates:", len(r["templates"]))'
-```
-
-Expected resources: 29 events and 29 templates for your supplied HDFS model. If loading reports a scikit-learn incompatibility, preserve the training dependency versions; do not blindly upgrade or downgrade the model environment. The uploaded dependency pins were retained, with PostgreSQL and Gunicorn added.
-
-GET /api/ now returns a health JSON response. The uploaded index view deleted jobs, features, and predictions; that deletion was removed.
-
-## 5. Submit a sample job
-
-```bash
-curl -sS -X POST 'http://127.0.0.1:8000/api/jobs/' \
-  -H "Authorization: Token $API_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"source_url":"http://logs:9000/sample_hdfs.log"}'
-```
-
-Follow processing:
-
-```bash
-docker compose --env-file docker.env logs -f conversion prediction
-```
-
-Ctrl+C exits log-following only; it does not stop the containers. Copy the returned job UUID:
-
-```bash
-JOB_ID='replace-with-returned-job-id'
-curl -sS "http://127.0.0.1:8000/api/jobs/$JOB_ID/" \
-  -H "Authorization: Token $API_TOKEN"
-curl -sS "http://127.0.0.1:8000/api/jobs/$JOB_ID/predictions/" \
-  -H "Authorization: Token $API_TOKEN"
-```
-
-For your unchanged sample and model, expect 415 blocks, 118 Normal and 297 Anomaly. Prediction remains a separate asynchronous stage; wait until status is completed.
-
-## 6. Submit the full file
-
-```bash
-curl -sS -X POST 'http://127.0.0.1:8000/api/jobs/' \
-  -H "Authorization: Token $API_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"source_url":"http://logs:9000/HDFS.log"}'
-```
-
-Expected unchanged-data totals: 11,175,629 matched lines, 575,061 blocks, 557,539 Normal and 17,522 Anomaly. Timings are machine dependent; measure again in Docker, especially after switching to PostgreSQL. Assign enough CPU/RAM to Docker Desktop for the chosen parser count.
-
-## 7. Inspect Kafka
-
-```bash
-docker compose --env-file docker.env exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka:9092 --describe --group hdfs-job-processors --members --verbose
-docker compose --env-file docker.env exec kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka:9092 --describe --group hdfs-prediction-processors
-```
-
-The default one conversion consumer owns all four log-jobs partitions. Multiple consumers distribute separate jobs, not one file. Do not scale this during an active job: existing interrupted-job/rebalance recovery still requires manual inspection. Four conversion replicas with 10 parser workers each could launch 40 local subprocesses. PostgreSQL removes SQLite file-lock contention, but does not implement job leases or automatic recovery.
-
-## 8. Stop / rebuild
-
-Allow current jobs to complete before stopping, because in-memory aggregation is not checkpointed.
-
-```bash
-docker compose --env-file docker.env stop
-docker compose --env-file docker.env up --build -d
 python3 -m http.server 9005 --bind 0.0.0.0
+```
+
+Keep the terminal running while the pipeline processes the file.
+
+The Docker worker can read the file using:
+
+```text
+http://host.docker.internal:9005/HDFS.log
+```
+
+A `GET /HDFS.log` response with status **200** confirms that the file was accessed successfully.
+
+
+## 4. Search Predictions
+
+With Elasticsearch configured and running, index saved predictions:
+
+```bash
 docker compose --env-file docker.env exec web python manage.py index_predictions
 ```
 
 
 
+## 5. API Endpoints
 
-Database and Kafka data persist in named volumes. Do not use down -v unless you intentionally want to erase both data stores.
+Base URL: `http://127.0.0.1:8000/api/`
 
-## Changes from the upload
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/api/` | delete all the jobs |
+| POST | `/api/jobs/` | Creates a processing job |
+| GET | `/api/jobs/<job_id>/` | Returns job status and statistics |
+| GET | `/api/predictions/search/` | Searches indexed predictions by jobID, BlockID, lable to check the result  |
 
-- Added Dockerfile, Compose, docker.env.example, .dockerignore, and this guide.
-- Added the missing initial log_analyzer migration; the upload contained no migrations.
-- Added environment-based database, Kafka, model/template, and URL configuration.
-- Docker uses PostgreSQL; running without POSTGRES_HOST retains the SQLite fallback.
-- Removed automatic Celery import and the unused Celery import from views; legacy task files/dependencies remain inactive.
-- Replaced destructive index GET with a health response.
-- Kept conversion, parser, prediction, and Kafka handoff algorithms unchanged.
-- Excluded the uploaded database, bytecode, secrets, logs, and trained model from the delivered archive.
 
-## Validation and limitations
 
-Validated here: dependency installation, Django system checks, fresh migrations, no pending model migrations, PostgreSQL backend/driver configuration, Python syntax, YAML structure/dependency references, and a small synthetic test exercising two spawned parser processes, cross-chunk merging, feature/prediction writes, API job dispatch (Kafka publisher mocked), retrieval, and non-destructive health behavior.
+Search using **`job_id`**, **`block_id`**, and **`label`**, individually or together.
 
-Docker is unavailable in the validation environment, so image build, live Kafka/PostgreSQL integration, Apple Silicon behavior, and full-file/model execution have not been tested here. Run the sample checks above before the full file. This is a local development Compose stack: single Kafka broker, local credentials/plaintext private network, and manual interrupted-job recovery. It is not a Kubernetes production deployment.
+**By job ID:**
+
+```bash
+curl -sS "http://127.0.0.1:8000/api/predictions/search/?job_id=$JOB_ID"
+```
+
+**By block ID:**
+
+```bash
+curl -sS "http://127.0.0.1:8000/api/predictions/search/?block_id=blk_-1608999687919862906"
+```
+
+**By label:**
+
+```bash
+curl -sS "http://127.0.0.1:8000/api/predictions/search/?label=Anomaly"
+```
+
+**Combined filters:**
+
+```bash
+curl -sS "http://127.0.0.1:8000/api/predictions/search/?job_id=$JOB_ID&block_id=blk_-1608999687919862906&label=Anomaly"
+```
+
+Copy the job ID from the response.
+
+Monitor processing:
+
+```bash
+docker compose --env-file docker.env logs -f conversion prediction
+```
+
+Press **Ctrl+C** to stop following logs. Containers continue running.
+
+For the unchanged supplied sample and model, expected results are **415 blocks: 118 Normal and 297 Anomaly**.
+
+
+
+Wait until the job status is `completed`.
+
+## 6. Process the Full Dataset
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/api/jobs/ -H 'Content-Type: application/json' -d '{"source_url":"http://logs:9000/HDFS.log"}'
+```
+
+Expected results for the unchanged dataset and model:
+
+| Metric | Result |
+|---|---:|
+| Matched lines | 11,175,629 |
+| Unique blocks | 575,061 |
+| Normal | 557,539 |
+| Anomaly | 17,522 |
+
+Processing times depend on the available CPU, memory, and database performance.
+
+
+
+Start again:
+
+```bash
+docker compose --env-file docker.env up -d
+```
+
+Rebuild after code changes:
+
+```bash
+docker compose --env-file docker.env up --build -d
+```
+
+PostgreSQL and Kafka data persist in named volumes. **Do not run `docker compose down -v` unless you intend to delete those data stores.**
+
+## Architecture and Limitations
+
+A conversion consumer parses each file using local multiprocessing, merges event counts, and saves features. A separate prediction consumer loads those features, applies the trained model, and stores results.
+
+Multiple conversion consumers distribute separate jobs; they do not distribute chunks of one file across containers. This is a development setup with a single Kafka broker and manual recovery for interrupted jobs.

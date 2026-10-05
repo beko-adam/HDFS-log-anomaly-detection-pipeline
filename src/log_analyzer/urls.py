@@ -11,7 +11,7 @@ from .views import (
 
 
 urlpatterns = [
-    path("", index, name="index"),
+    path("", index, name="delete-all-jobs"),
     path("jobs/", CreateJobView.as_view()),
     path("jobs/<uuid:pk>/", JobDetailView.as_view()),
     path(

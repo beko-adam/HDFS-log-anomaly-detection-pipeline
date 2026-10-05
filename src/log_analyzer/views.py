@@ -37,6 +37,16 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 
+import csv
+
+from django.http import StreamingHttpResponse
+from django.shortcuts import get_object_or_404
+from rest_framework import generics
+
+class Echo:
+    def write(self, value):
+        return value
+
 logger = logging.getLogger(__name__)
 
 
@@ -155,16 +165,6 @@ class JobDetailView(APIView):
 
 #         return queryset
 
-
-import csv
-
-from django.http import StreamingHttpResponse
-from django.shortcuts import get_object_or_404
-from rest_framework import generics
-
-class Echo:
-    def write(self, value):
-        return value
 
 
 class PredictionListView(generics.ListAPIView):

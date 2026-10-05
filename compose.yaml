@@ -16,7 +16,7 @@ x-app: &app
     HDFS_TEMPLATE_PATH: /outputs/HDFS.log_templates.csv
     LOG_ALLOWED_ORIGINS: http://host.docker.internal:9005
     ELASTICSEARCH_URL: http://elasticsearch:9200
-    DJANGO_ENV: development
+    DJANGO_ENV: production
 
   volumes:
     - ./outputs:/outputs:ro

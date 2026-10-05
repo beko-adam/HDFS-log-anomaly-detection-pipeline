@@ -10,11 +10,9 @@ from itertools import islice
 import httpx
 import joblib
 import numpy as np
-
 from django.conf import settings
 from django.db import close_old_connections, connections, transaction
 from django.utils import timezone
-
 from .models import BlockFeature, LogJob
 from .parser_workers import initialize_parser, parse_chunk
 import threading

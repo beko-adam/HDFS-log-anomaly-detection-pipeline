@@ -7,6 +7,7 @@ from log_analyzer.models import *
 
 admin.site.register(LogJob)
 admin.site.register(BlockFeature)
+admin.site.register(JobEvaluation)
 
 
 

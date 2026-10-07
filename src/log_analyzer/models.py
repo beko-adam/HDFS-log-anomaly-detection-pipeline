@@ -61,6 +61,22 @@ class BlockPrediction(models.Model):
     def __str__(self):
         return f"{self.feature.block_id} — {self.label}"
 
+
+
+class JobEvaluation(models.Model):
+    job = models.OneToOneField(
+        LogJob,
+        on_delete=models.CASCADE,
+        related_name="evaluation",
+    )
+    accuracy = models.FloatField()
+    precision = models.FloatField()
+    recall = models.FloatField()
+    f1 = models.FloatField()
+    confusion_matrix = models.JSONField()
+    evaluated_blocks = models.PositiveIntegerField()
+    updated_at = models.DateTimeField(auto_now=True)
+
     
 
 # class LogJob(models.Model):

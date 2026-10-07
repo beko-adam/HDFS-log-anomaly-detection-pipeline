@@ -43,6 +43,29 @@ from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
 
+
+
+from django.db import transaction
+from log_analyzer.models import LogJob, BlockFeature, BlockPrediction, JobEvaluation
+
+
+@transaction.atomic
+def clean_pipeline_database():
+    counts = {
+        "evaluations": JobEvaluation.objects.count(),
+        "predictions": BlockPrediction.objects.count(),
+        "features": BlockFeature.objects.count(),
+        "jobs": LogJob.objects.count(),
+    }
+
+    JobEvaluation.objects.all().delete()
+    BlockPrediction.objects.all().delete()
+    BlockFeature.objects.all().delete()
+    LogJob.objects.all().delete()
+
+    return counts
+
+
 class Echo:
     def write(self, value):
         return value
@@ -56,8 +79,8 @@ def index(request):
 
 
    
-    LogJob.objects.all().first().delete()
-    return JsonResponse({"status": "ok", "service": "hdfs-anomaly"})
+    clean_pipeline_database()
+    return JsonResponse({"status": "ok", "database": "cleaned"})
 
 
 

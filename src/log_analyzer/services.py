@@ -146,6 +146,9 @@ def convert_logs(source_url, resources, workers=5, chunk_size=200_000):
 
         merge_start = time.perf_counter()
 
+
+        ##########################more import section marge and combine ##########################
+
         for block_id, incoming_counts in counts.items():
             existing_counts = block_counts.get(block_id)
 
@@ -159,11 +162,12 @@ def convert_logs(source_url, resources, workers=5, chunk_size=200_000):
 
         merge_seconds += time.perf_counter() - merge_start
         completed_chunks += 1
+        ##########################more import section marge and combine ##########################
 
         if completed_chunks == 1 or completed_chunks % 10 == 0:
             print(f"Merged chunks: {completed_chunks:,} | Processed lines: {statistics['total_lines']:,} | Blocks: {len(block_counts):,}", flush=True)
 
-    lines = collect_data(source_url)
+    lines = collect_data(source_url) # here. the collect_data function is called to get the lines from the source_url, which will be processed in chunks by multiple workers.
     pending = set()
     context = multiprocessing.get_context("spawn")
 
@@ -383,14 +387,14 @@ def convert_and_save_logs(source_url, batch_size=100_000, job_id=None, resources
     with MemoryMonitor(interval=0.5) as memory:
         try:
             if resources is None:
-                resources = load_conversion_resources()
+                resources = load_conversion_resources() # number 2 
 
             job.event_ids = resources["event_ids"]
             job.threshold = resources["threshold"]
             job.save(update_fields=["event_ids", "threshold"])
             print(f"Conversion job: {job.pk}", flush=True)
 
-            block_counts, statistics = convert_logs(source_url, resources, workers=workers, chunk_size=chunk_size)
+            block_counts, statistics = convert_logs(source_url, resources, workers=workers, chunk_size=chunk_size) # number 2
             memory.sample()
             print(f"Memory after conversion | main RSS={memory.process.memory_info().rss / (1024 ** 2):,.1f} MB | blocks={len(block_counts):,}", flush=True)
 

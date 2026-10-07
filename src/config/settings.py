@@ -80,21 +80,21 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 if os.environ.get("DJANGO_ENV") == "production":
     DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ["POSTGRES_DB"],
-            "USER": os.environ["POSTGRES_USER"],
-            "PASSWORD": os.environ["POSTGRES_PASSWORD"],
-            "HOST": os.environ["POSTGRES_HOST"],
-            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-            "CONN_MAX_AGE": 60,
-            "CONN_HEALTH_CHECKS": True,
-            "OPTIONS": {
-                "sslmode": "require",
-                "connect_timeout": 10,
-            },
+            "default": {
+                "ENGINE": "django.db.backends.postgresql",
+                "NAME": os.environ["POSTGRES_DB"],
+                "USER": os.environ["POSTGRES_USER"],
+                "PASSWORD": os.environ["POSTGRES_PASSWORD"],
+                "HOST": os.environ["POSTGRES_HOST"],
+                "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+                "CONN_MAX_AGE": 60,
+                "CONN_HEALTH_CHECKS": True,
+                "OPTIONS": {
+                    "sslmode": "require",
+                    "connect_timeout": 10,
+                },
+            }
         }
-    }
 else:
 
     DATABASES = {
@@ -104,6 +104,12 @@ else:
     }
 }
 
+
+# DATABASES = {
+# "default": {
+#     "ENGINE": "django.db.backends.sqlite3",
+#     "NAME": BASE_DIR / "data" / "db.sqlite3",
+# }}
 
 
 # Password validation
@@ -198,3 +204,11 @@ LOG_CHUNK_SIZE = int(os.environ.get("LOG_CHUNK_SIZE", "200000"))
 LOG_FEATURE_BATCH_SIZE = int(os.environ.get("LOG_FEATURE_BATCH_SIZE", "100000"))
 LOG_PREDICTION_BATCH_SIZE = int(os.environ.get("LOG_PREDICTION_BATCH_SIZE", "100000"))
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+
+
+
+
+KAFKA_EVALUATION_TOPIC = os.getenv("KAFKA_EVALUATION_TOPIC", "evaluation-jobs")
+KAFKA_EVALUATION_GROUP = os.getenv("KAFKA_EVALUATION_GROUP", "hdfs-evaluation-processors")
+HDFS_LABEL_PATH = os.getenv("HDFS_LABEL_PATH", "/outputs/anomaly_label.csv")

@@ -17,6 +17,9 @@ x-app: &app
     LOG_ALLOWED_ORIGINS: http://host.docker.internal:9005
     ELASTICSEARCH_URL: http://elasticsearch:9200
     DJANGO_ENV: production
+    KAFKA_EVALUATION_TOPIC: evaluation-jobs
+    KAFKA_EVALUATION_GROUP: hdfs-evaluation-processors
+    HDFS_LABEL_PATH: /outputs/anomaly_label.csv
 
   volumes:
     - ./outputs:/outputs:ro
@@ -98,6 +101,16 @@ services:
     <<: *app
     command: python manage.py consume_log_jobs --stage prediction
     restart: on-failure
+
+
+  evaluation:
+
+
+    <<: *app
+    command: python manage.py consume_log_jobs --stage evaluation
+    restart: on-failure
+
+ 
 
 volumes:
   kafka_data:
